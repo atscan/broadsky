@@ -23,6 +23,8 @@ import (
 	cbor "github.com/fxamacker/cbor/v2"
 
 	cli "github.com/urfave/cli/v2"
+
+	version "github.com/atscan/broadsky/util"
 )
 
 func main() {
@@ -34,7 +36,7 @@ func run(args []string) {
 	app := cli.App{
 		Name:     "broadsky",
 		Usage:    "bridge Streaming Wire Protocol (v0) to NATS and other protocols",
-		Version:  "0.01",
+		Version:  version.Version,
 		Compiled: time.Now(),
 		Authors: []*cli.Author{
 			&cli.Author{

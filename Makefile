@@ -9,7 +9,12 @@ help: ## Print info about all commands
 
 .PHONY: build
 build: ## Build all executables
-	go build ./cmd/broadsky.go
+	go build ./cmd/broadsky
+
+.PHONY: fmt
+fmt: ## Format all go files
+	go fmt ./cmd/*/*.go
+	go fmt ./util/*.go
 
 .PHONY: all
 all: build
