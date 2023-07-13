@@ -5,10 +5,10 @@ Bridge [Streaming Wire Protocol (v0)](https://atproto.com/specs/event-stream#str
 ## Installation
 
 ```bash
-go install github.com/atscan/broadsky/broadsky@latest
+go install github.com/atscan/broadsky/cmd/broadsky@latest
 ```
 
-## Usage
+## Examples
 
 ```bash
 # Bridge to NATS (using standard CBOR codec)
