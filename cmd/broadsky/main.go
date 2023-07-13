@@ -27,6 +27,12 @@ import (
 	version "github.com/atscan/broadsky/util"
 )
 
+type metricsData struct {
+	total   int
+	counts  map[string]int
+	mcounts map[string]int
+}
+
 func main() {
 	run(os.Args)
 }
@@ -66,7 +72,18 @@ var bridgeCmd = &cli.Command{
 		},
 		&cli.BoolFlag{
 			Name:  "debug",
+			Value: false,
 			Usage: "Show messages in JSON (for debugging)",
+		},
+		&cli.BoolFlag{
+			Name:  "metrics",
+			Value: false,
+			Usage: "Metrics HTTP endpoint /_metrics",
+		},
+		&cli.StringFlag{
+			Name:  "metrics-listen",
+			Value: "127.0.0.1:5212",
+			Usage: "Metrics host and port",
 		},
 	},
 	Subcommands: []*cli.Command{
@@ -106,12 +123,61 @@ var bridgeCmd = &cli.Command{
 					target = nats.DefaultURL
 				}
 
-				debug := cctx.Bool("debug")
-				codec := cctx.String("codec")
-
 				subject := cctx.Args().Get(2)
 				if subject == "" {
 					subject = "broadsky.stream.test"
+				}
+
+				debug := cctx.Bool("debug")
+				codec := cctx.String("codec")
+				metrics := cctx.Bool("metrics")
+
+				// initialize metrics http endpoint
+				stats := metricsData{0, make(map[string]int), make(map[string]int)}
+
+				var metricsQuit chan os.Signal
+				if metrics {
+					metricsListen := cctx.String("metrics-listen")
+
+					http.HandleFunc("/_metrics", func(w http.ResponseWriter, r *http.Request) {
+						if debug {
+							fmt.Printf("HTTP %s %s%s\n", r.Method, r.Host, r.URL)
+						}
+
+						if r.URL.Path != "/_metrics" {
+							http.Error(w, "Not Found", http.StatusNotFound)
+							return
+						}
+
+						w.Header().Set("Content-Type", "text/plain")
+
+						m := fmt.Sprintf("broadsky_bridge_events_total{server=\"nil\",repo=\"%v\"} %v\n", repo, stats.total)
+						for key, n := range stats.counts {
+							re := regexp.MustCompile("^([^:]+):app.bsky.([^\\/]+)")
+							match := re.FindStringSubmatch(key)
+							if match == nil {
+								continue
+							}
+							m += fmt.Sprintf("broadsky_bridge_events{server=\"nil\",repo=\"%v\",action=\"%v\",type=\"%v\"} %v\n", repo, match[1], match[2], n)
+						}
+
+						w.Write([]byte(m))
+					})
+
+					fmt.Fprintf(os.Stderr, "Metrics endpoint active: http://%v\n", metricsListen)
+
+					httpServer := http.Server{
+						Addr: metricsListen,
+					}
+
+					go func() {
+						if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
+							fmt.Errorf("HTTP server ListenAndServe Error: %v", err)
+						}
+					}()
+
+					metricsQuit = make(chan os.Signal, 1)
+					signal.Notify(metricsQuit, os.Interrupt)
 				}
 
 				// open target nats connection
@@ -133,12 +199,14 @@ var bridgeCmd = &cli.Command{
 					return fmt.Errorf("ws dial failure: %w", err)
 				}
 
+				banner()
 				fmt.Fprintln(os.Stderr, "Bridge Started", time.Now().Format(time.RFC3339))
 				defer func() {
 					fmt.Fprintln(os.Stderr, "Bridge Exited", time.Now().Format(time.RFC3339))
 				}()
 
 				go func() {
+					<-metricsQuit
 					<-ctx.Done()
 					_ = con.Close()
 				}()
@@ -151,6 +219,15 @@ var bridgeCmd = &cli.Command{
 							return err
 						}
 						nc.Publish(subject+".commit", b)
+
+						for _, op := range evt.Ops {
+							opkey := op.Action + ":" + strings.Split(op.Path, "/")[0]
+							stats.total++
+							if _, ok := stats.counts[opkey]; !ok {
+								stats.counts[opkey] = 0
+							}
+							stats.counts[opkey]++
+						}
 
 						if debug {
 							b, err := json.Marshal(evt)
@@ -213,4 +290,11 @@ func encode(codec string, evt interface{}) ([]byte, error) {
 		}
 	}
 	return b, nil
+}
+
+func banner() {
+	fmt.Fprintln(os.Stderr, "\n"+
+		" _ )  _ \\   _ \\     \\    _ \\    __|  |  / \\ \\  / \n"+
+		" _ \\    /  (   |   _ \\   |  | \\__ \\  . <   \\  / \n"+
+		"___/ _|_\\ \\___/  _/  _\\ ___/  ____/ _|\\_\\   _|  \n")
 }
